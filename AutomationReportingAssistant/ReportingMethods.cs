@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Threading.Tasks;
 
 namespace AutomationReportingAssistant
 {
@@ -264,7 +265,7 @@ namespace AutomationReportingAssistant
             var processedTestsCounter = 0;
             var failedTestsListCounter = failedTestsList.Count;
 
-            foreach (var failedTest in failedTestsList)//.Take(100))
+            Parallel.ForEach(failedTestsList, new ParallelOptions { MaxDegreeOfParallelism = 4 }, failedTest =>
             {
                 var testResult = RunFailedTest(failedTest.Split(":::").FirstOrDefault(), failedTest.Split(":::")[1]);
 
@@ -291,7 +292,7 @@ namespace AutomationReportingAssistant
 
                     processedTestsCounter++;
                 }
-            }
+            });
 
             Console.WriteLine($"Processed tests number: {processedTestsCounter} from total {failedTestsListCounter} tests");
         }
