@@ -424,7 +424,7 @@ namespace AutomationReportingAssistant
 
             if (parameterTestValue == string.Empty)
             {
-                return "GetTestFullName HTTP response was null after 5 tries";
+                return $"GetTestFullName HTTP response was null after {retryCount} tries in test {testName}{parameterName}";
             }
 
             request.AddHeader("Content-Length", $"{parameterTestValue.Length}");
@@ -443,9 +443,9 @@ namespace AutomationReportingAssistant
 
             if (response == null)
             {
-                var retryFailMessage = "RunFaiIedTest HTTP response was null after 5 tries";
+                var retryFailMessage = $"RunFaiIedTest HTTP response was null after {retryCount} tries";
 
-                Console.WriteLine($"{retryFailMessage}: {testName}{parameterName}");
+                Console.WriteLine($"{retryFailMessage} in test {testName}{parameterName}");
                 return retryFailMessage;
             }
 
@@ -454,48 +454,69 @@ namespace AutomationReportingAssistant
             html.LoadHtml(source);
 
             var root = html.DocumentNode;
-            var resultString = root.Descendants("h6").Where(t => t.InnerHtml.Contains("Passed")).Select(t => t.InnerText).ToList().FirstOrDefault().ToString().Split(';');
-            var exceptionMessage = root.Descendants("span");
 
-            var exceptionMessageParsed = "";
-            foreach (var e in exceptionMessage.Skip(1))
+            try
             {
-                exceptionMessageParsed += e.InnerText;
+                var resultList = root.Descendants("h6").Where(t => t.InnerHtml.Contains("Passed")).Select(t => t.InnerText).ToList().FirstOrDefault();
+
+                if (resultList != null)
+                {
+                    var resultArray = resultList.ToString().Split(';');
+
+                    var exceptionMessage = root.Descendants("span");
+
+                    var exceptionMessageParsed = "";
+                    foreach (var e in exceptionMessage.Skip(1))
+                    {
+                        exceptionMessageParsed += e.InnerText;
+                    }
+
+                    totalCount = resultArray[0].Split(':')[1].Trim();
+                    passedCount = resultArray[1].Split(':')[1].Trim();
+                    failedCount = resultArray[2].Split(':')[1].Trim();
+                    inconclusiveCount = resultArray[3].Split(':')[1].Trim();
+                    skippedCount = resultArray[4].Split(':')[1].Trim().Split("   ").FirstOrDefault();
+
+                    if (totalCount == "1")
+                    {
+                        var returnValue = "";
+
+                        if (passedCount == "1")
+                        {
+                            returnValue = "Passed";
+                        }
+                        else if (failedCount == "1")
+                        {
+                            returnValue = $"Failed:::{exceptionMessageParsed}";
+                        }
+                        else if (inconclusiveCount == "1")
+                        {
+                            returnValue = "Inconclusive";
+                            Console.WriteLine($"{returnValue}: {testName}{parameterName}");
+                        }
+                        else if (skippedCount == "1")
+                        {
+                            returnValue = "Skipped";
+                            Console.WriteLine($"{returnValue}: {testName}{parameterName}");
+                        }
+                        return returnValue;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Total count is not 1 in test {testName}{parameterName}");
+                        return $"Total count is not 1 in test {testName}{parameterName}";
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Result list is null in test {testName}{parameterName}");
+                    return $"Result list is null in test {testName}{parameterName}";
+                }
             }
-
-            totalCount = resultString[0].Split(':')[1].Trim();
-            passedCount = resultString[1].Split(':')[1].Trim();
-            failedCount = resultString[2].Split(':')[1].Trim();
-            inconclusiveCount = resultString[3].Split(':')[1].Trim();
-            skippedCount = resultString[4].Split(':')[1].Trim().Split("   ").FirstOrDefault();
-
-            if (totalCount == "1")
+            catch (NullReferenceException)
             {
-                var returnValue = "";
-
-                if (passedCount == "1")
-                {
-                    returnValue = "Passed";
-                }
-                else if (failedCount == "1")
-                {
-                    returnValue = $"Failed:::{exceptionMessageParsed}";
-                }
-                else if (inconclusiveCount == "1")
-                {
-                    returnValue = "Inconclusive";
-                    Console.WriteLine($"{returnValue}: {testName}{parameterName}");
-                }
-                else if (skippedCount == "1")
-                {
-                    returnValue = "Skipped";
-                    Console.WriteLine($"{returnValue}: {testName}{parameterName}");
-                }
-                return returnValue;
-            }
-            else
-            {
-                return "Total count is not 1";
+                Console.WriteLine($"Unexpected HTML response in test {testName}{parameterName}");
+                return $"Unexpected HTML response in test {testName}{parameterName}";
             }
         }
 
@@ -525,6 +546,17 @@ namespace AutomationReportingAssistant
             catch (ArgumentNullException e)
             {
                 Console.WriteLine("VPN is probably disabled");
+            }
+            catch (JsonReaderException)
+            {
+                if (response.Result.Content.Contains("An error occurred while processing your request"))
+                {
+                    Console.WriteLine($"HTML response is returned with error instead of JSON for test {testName}");
+                }
+                else
+                {
+                    Console.WriteLine($"Could not parse JSON response for test {testName}");
+                }
             }
 
             return fullTestName;
