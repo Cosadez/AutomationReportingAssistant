@@ -25,28 +25,16 @@ namespace AutomationReportingAssistant
         {
             var failedTestsArray = new string[1000, 3];
 
-            var envColumn = "J"; // QA
-            //var envColumn = "I"; // RC
+            var envColumn = ReportingReqs.environment == "rc" ? "I" : "J";
 
             var range = $"A2:{envColumn}1000";
 
             var valuesResult = ReadEntries(spreadsheetId, sheetId, range);
 
+            var indexByEnv = ReportingReqs.environment == "rc" ? 7 : 8;
+
             if (valuesResult != null && valuesResult.Count > 0)
             {
-                // if report = RC
-                //for (int i = 0; i < valuesResult.Count; i++)
-                //{
-                //    if (valuesResult[i].Count <= 8)
-                //    {
-                //        failedTestsArray[i, 0] = (string)valuesResult[i][0];
-                //        failedTestsArray[i, 1] = (string)valuesResult[i][1];
-                //        failedTestsArray[i, 2] = (string)valuesResult[i][7];
-                //    }
-                //}
-
-                // if report = QA
-
                 if (includeFilledResults)
                 {
                     for (int i = 0; i < valuesResult.Count; i++)
@@ -54,18 +42,18 @@ namespace AutomationReportingAssistant
 
                         failedTestsArray[i, 0] = (string)valuesResult[i][0]; // test name
                         failedTestsArray[i, 1] = (string)valuesResult[i][1]; // test parameters
-                        failedTestsArray[i, 2] = (string)valuesResult[i][8]; // exception message
+                        failedTestsArray[i, 2] = (string)valuesResult[i][indexByEnv]; // exception message
                     }
                 }
                 else
                 {
                     for (int i = 0; i < valuesResult.Count; i++)
                     {
-                        if (valuesResult[i].Count <= 9)
+                        if (valuesResult[i].Count <= indexByEnv+1)
                         {
                             failedTestsArray[i, 0] = (string)valuesResult[i][0]; // test name
                             failedTestsArray[i, 1] = (string)valuesResult[i][1]; // test parameters
-                            failedTestsArray[i, 2] = (string)valuesResult[i][8]; // exception message
+                            failedTestsArray[i, 2] = (string)valuesResult[i][indexByEnv]; // exception message
                         }
                     }
                 }
@@ -124,8 +112,7 @@ namespace AutomationReportingAssistant
 
         static void UpdateEntry(string spreadsheetId, string sheetName, string rowId, string value)
         {
-            var envColumn = "J"; // QA
-            //var envColumn = "I"; // RC
+            var envColumn = ReportingReqs.environment == "rc" ? "I" : "J";
 
             var range = $"{sheetName}!{envColumn}{rowId}";
             var valueRange = new ValueRange();
@@ -212,8 +199,7 @@ namespace AutomationReportingAssistant
             var sourceSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetOfAllTests).FirstOrDefault().Properties.SheetId;
             var targetSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetOfTestsGroupedByException).FirstOrDefault().Properties.SheetId;
 
-            var sourceColumnId = 9; // qa
-            //var sourceColumnId = 8; // rc
+            var sourceColumnId = ReportingReqs.environment == "rc" ? 8 : 9;
 
             var targetColumnId = 3;
 
@@ -284,9 +270,9 @@ namespace AutomationReportingAssistant
 
                 if (testResult.Contains("Failed"))
                 {
-                    var ex1 = testResult.Split(":::")[1].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "");
+                    var ex1 = testResult.Split(":::")[1].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "").Replace("<Pariplay.Gateway.ServiceLayer.Messages.Error>", "");
 
-                    var ex2 = failedTest.Split(":::")[3].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "");
+                    var ex2 = failedTest.Split(":::")[3].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "").Replace("<Pariplay.Gateway.ServiceLayer.Messages.Error>", "");
 
                     if (ex1 == ex2)
                     {
@@ -406,9 +392,7 @@ namespace AutomationReportingAssistant
 
             var retryCount = 3;
 
-            var env = "qa"; // or "rc"
-
-            var requestUrl = $"http://specflow.{env}.gamesrv1.com/Home/RunTests";
+            var requestUrl = $"http://specflow.{ReportingReqs.environment}.gamesrv1.com/Home/RunTests";
 
             var request = new RestRequest(requestUrl, Method.Post);
 
@@ -524,9 +508,7 @@ namespace AutomationReportingAssistant
         {
             var fullTestName = "";
 
-            var env = "qa"; // or "rc"
-
-            var requestUrl = $"http://specflow.{env}.gamesrv1.com/Home/GetTree?search={testName.Replace("\\", "")}";
+            var requestUrl = $"http://specflow.{ReportingReqs.environment}.gamesrv1.com/Home/GetTree?search={testName.Replace("\\", "")}";
             var response = new RestClient(requestUrl).ExecuteGetAsync(new RestRequest(requestUrl, Method.Get));
 
             try

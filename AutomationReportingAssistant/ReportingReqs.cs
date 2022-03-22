@@ -6,7 +6,7 @@ namespace AutomationReportingAssistant
     {
         string[,] currentDocUrlArrayNotFilled, currentDocUrlArrayIncludingFilled,  currentGroupedDocUrlArray, previousDocUrlArray, previousGroupedDocUrlArray;
 
-        public static readonly string sourceSpreadsheetId = "1VMU63GN7751EiOFtqW5o7iyUufcBAHhxhexc5s932NQ";
+        public static readonly string sourceSpreadsheetId = "put spreadsheet ID here";
         public static readonly string targetSpreadsheetId = sourceSpreadsheetId;
 
         public static readonly string sheetOfAllTests = "Failed";
@@ -14,6 +14,8 @@ namespace AutomationReportingAssistant
         public static readonly string sheetCopiedFromSource = "Previous report results";
 
         static readonly List<string> keysList = new List<string>();// { "registration", "login", "deposit", "debit", "e2e" };
+
+        public static readonly string environment = "qa"; // "qa" (by default) or "rc"
 
         public void FillGoogleReportWithTestResults()
         {
