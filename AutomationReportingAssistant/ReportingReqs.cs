@@ -13,17 +13,19 @@ namespace AutomationReportingAssistant
         public static readonly string sheetOfTestsGroupedByException = "errors pivot list";
         public static readonly string sheetCopiedFromSource = "Previous report results";
 
-        static readonly List<string> keysList = new List<string>();// { "registration", "login", "deposit", "debit", "e2e" };
+        static readonly List<string> keysList = new (); // { "registration", "login", "deposit", "debit", "e2e" };
 
         public static readonly string environment = "qa"; // "qa" (by default) or "rc"
 
         public void FillGoogleReportWithTestResults()
         {
-            ReportingMethods.CopySheetFromOneSpreadSheetToOtherAndRename(sourceSpreadsheetId, targetSpreadsheetId);
+            ReportingMethods.PrepareGoogleSheetApiClient();
+
+            //ReportingMethods.CopySheetFromOneSpreadSheetToOtherAndRename(sourceSpreadsheetId, targetSpreadsheetId);
 
             currentDocUrlArrayNotFilled = ReportingMethods.GetAllFailedTestsAsArray(targetSpreadsheetId, sheetOfAllTests, false);
             currentDocUrlArrayIncludingFilled = ReportingMethods.GetAllFailedTestsAsArray(targetSpreadsheetId, sheetOfAllTests, true);
-            previousDocUrlArray = ReportingMethods.GetAllFailedTestsAsArray(targetSpreadsheetId, sheetCopiedFromSource, false);
+            previousDocUrlArray = ReportingMethods.GetAllFailedTestsAsArray(targetSpreadsheetId, sheetOfAllTests, true); // return parameters sheetCopiedFromSource and false later
 
             currentGroupedDocUrlArray = ReportingMethods.GetGroupedFailedTestsAsArray(targetSpreadsheetId, sheetOfTestsGroupedByException);
             //previousGroupedDocUrlArray = ReportingMethods.GetGroupedFailedTestsAsArray(targetSpreadsheetId, sheetCopiedFromSource);

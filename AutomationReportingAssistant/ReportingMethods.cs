@@ -139,7 +139,7 @@ namespace AutomationReportingAssistant
             var deleteResponse = deleteRequest.Execute();
         }
 
-        public static void CopySheetFromOneSpreadSheetToOtherAndRename(string sSpreadsheetId, string tSpreadsheetId)
+        public static void PrepareGoogleSheetApiClient()
         {
             GoogleCredential credential;
 
@@ -153,7 +153,10 @@ namespace AutomationReportingAssistant
                 HttpClientInitializer = credential,
                 ApplicationName = ApplicationName
             });
+        }
 
+        public static void CopySheetFromOneSpreadSheetToOtherAndRename(string sSpreadsheetId, string tSpreadsheetId)
+        {
             var sSpreadSheet = service.Spreadsheets.Get(sSpreadsheetId).Execute();
             var sourceSheetId = sSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetOfAllTests).FirstOrDefault().Properties.SheetId;
 
@@ -450,7 +453,7 @@ namespace AutomationReportingAssistant
 
                 if (resultList != null)
                 {
-                    var resultArray = resultList.ToString().Split(';');
+                    var resultArray = resultList.Split(';');
 
                     var exceptionMessage = root.Descendants("span");
 
