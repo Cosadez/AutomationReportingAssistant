@@ -6,10 +6,10 @@ namespace AutomationReportingAssistant
     {
         string[,] currentDocUrlArrayNotFilled, currentDocUrlArrayIncludingFilled,  currentGroupedDocUrlArray, previousDocUrlArray, previousGroupedDocUrlArray;
 
-        public static readonly string sourceSpreadsheetId = "put spreadsheet ID here";
+        public static readonly string sourceSpreadsheetId = "put spreadsheet ID here"; // e.g. "18A-qjVd2aipy7pOBXqRTHNNriuc6USlnFVPVujALDVM"
         public static readonly string targetSpreadsheetId = sourceSpreadsheetId;
 
-        public static readonly string sheetOfAllTests = "Failed";
+        public static readonly string sheetOfAllTests = "Failed"; // "Failed" or "NotExecuted"
         public static readonly string sheetOfTestsGroupedByException = "errors pivot list";
         public static readonly string sheetCopiedFromSource = "Previous report results";
 

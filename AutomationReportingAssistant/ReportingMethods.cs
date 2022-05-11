@@ -22,6 +22,10 @@ namespace AutomationReportingAssistant
 
         static SheetsService service;
 
+        private static readonly string totalCountError = "Total count is not 1 in test ";
+        private static readonly string resultListError = "Result list is null in test ";
+        private static readonly string unexpectedHtmlError = "Unexpected HTML response in test ";
+
         internal static string[,] GetAllFailedTestsAsArray(string spreadsheetId, string sheetId, bool includeFilledResults)
         {
             var failedTestsArray = new string[1000, 3];
@@ -269,7 +273,7 @@ namespace AutomationReportingAssistant
             {
                 var testResult = RunFailedTest(failedTest.Split(":::").FirstOrDefault(), failedTest.Split(":::")[1]);
 
-                if (testResult.Contains("Failed"))
+                if (testResult.Contains("Failed") && !testResult.Contains(totalCountError) && !testResult.Contains(resultListError) && !testResult.Contains(unexpectedHtmlError))
                 {
                     var ex1 = testResult.Split(":::")[1].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "").Replace("<Pariplay.Gateway.ServiceLayer.Messages.Error>", "");
 
@@ -488,20 +492,20 @@ namespace AutomationReportingAssistant
                     }
                     else
                     {
-                        Console.WriteLine($"Total count is not 1 in test {testName}{parameterName}");
-                        return $"Total count is not 1 in test {testName}{parameterName}";
+                        Console.WriteLine($"{totalCountError}{testName}{parameterName}");
+                        return $"{totalCountError}{testName}{parameterName}";
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"Result list is null in test {testName}{parameterName}");
-                    return $"Result list is null in test {testName}{parameterName}";
+                    Console.WriteLine($"{resultListError}{testName}{parameterName}");
+                    return $"{resultListError}{testName}{parameterName}";
                 }
             }
             catch (NullReferenceException)
             {
-                Console.WriteLine($"Unexpected HTML response in test {testName}{parameterName}");
-                return $"Unexpected HTML response in test {testName}{parameterName}";
+                Console.WriteLine($"{unexpectedHtmlError}{testName}{parameterName}");
+                return $"{unexpectedHtmlError}{testName}{parameterName}";
             }
         }
 
