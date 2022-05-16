@@ -16,9 +16,20 @@ namespace AutomationReportingAssistant
 {
     class ReportingMethods
     {
+        public static string[,] currentGroupedDocUrlArray, previousGroupedDocUrlArray;
+        public static readonly string sheetOfTestsGroupedByException = "errors pivot list";
+        public static readonly string sheetCopiedFromSource = "Previous report results";
+
+        public static int processedTestsCounter = 0;
+        
         static readonly string[] Scopes = { SheetsService.Scope.Spreadsheets };
 
         static readonly string ApplicationName = "AutomationReportingAssistant";
+
+        private static int failedTestsListCounter = 0;
+        private static readonly int retryCount = 5;
+        private static readonly int arrayMaxLength = 1000;
+        private static readonly int rerunCount = 3;
 
         static SheetsService service;
 
@@ -26,13 +37,14 @@ namespace AutomationReportingAssistant
         private static readonly string resultListError = "Result list is null in test ";
         private static readonly string unexpectedHtmlError = "Unexpected HTML response in test ";
 
-        internal static string[,] GetAllFailedTestsAsArray(string spreadsheetId, string sheetId, bool includeFilledResults)
+        internal static string[,] GetAllFailedTestsAsArray(string spreadsheetId, string sheetId, bool isIncludedFilledResults)
         {
-            var failedTestsArray = new string[1000, 3];
+
+            var failedTestsArray = new string[arrayMaxLength, 3];
 
             var envColumn = ReportingReqs.environment == "rc" ? "I" : "J";
 
-            var range = $"A2:{envColumn}1000";
+            var range = $"A2:{envColumn}{arrayMaxLength}";
 
             var valuesResult = ReadEntries(spreadsheetId, sheetId, range);
 
@@ -40,7 +52,7 @@ namespace AutomationReportingAssistant
 
             if (valuesResult != null && valuesResult.Count > 0)
             {
-                if (includeFilledResults)
+                if (isIncludedFilledResults)
                 {
                     for (int i = 0; i < valuesResult.Count; i++)
                     {
@@ -64,14 +76,126 @@ namespace AutomationReportingAssistant
                 }
             }
 
+            if (ReportingReqs.isReversedTestList)
+            {
+                Stack<string> stack = new(failedTestsArray.Cast<string>());
+
+                FillMatrix(failedTestsArray, stack);
+
+                Reverse2DimArray(failedTestsArray);
+            }
+
             return failedTestsArray;
+        }
+
+        internal static void RunAllFailedTests(TestRunApproach approach)
+        {
+            Console.WriteLine("STARTING TEST RUN");
+
+            for (int i = 0; i < rerunCount; i++)
+            {
+                processedTestsCounter = 0;
+
+                var currentDocUrlList = GetAllCommonFailedTestsFilteredByKeys(GetAllFailedTestsAsArray(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, ReportingReqs.isRunIncludesTestsWithFilledResults));
+
+                Console.WriteLine($"\nITERATION {i+1}. TESTS AMOUNT: {currentDocUrlList.Count}");
+
+                switch (approach)
+                {
+                    case TestRunApproach.Parallel:
+                        RunAllFailedTestsParallel(currentDocUrlList);
+                        break;
+                    case TestRunApproach.AsyncAwait:
+                        RunAllFailedTestsAsync(currentDocUrlList).Wait();
+                        break;
+                }
+            }
+
+            Console.WriteLine("TEST RUN FINISHED\n");
+
+        }
+
+        internal static string[,] RemoveEmptyRows2(string[,] strs)
+        {
+            int length1 = strs.GetLength(0);
+            int length2 = strs.GetLength(1);
+
+            // First we put somewhere a list of the indexes of the non-emtpy rows
+            var nonEmpty = new List<int>();
+
+            for (int i = 0; i < length1; i++)
+            {
+                for (int j = 0; j < length2; j++)
+                {
+                    if (strs[i, j] != null)
+                    {
+                        nonEmpty.Add(i);
+                        break;
+                    }
+                }
+            }
+
+            // Then we create an array of the right size
+            string[,] strs2 = new string[nonEmpty.Count, length2];
+
+            // And we copy the rows from strs to strs2, using the nonEmpty
+            // list of indexes
+            for (int i1 = 0; i1 < nonEmpty.Count; i1++)
+            {
+                int i2 = nonEmpty[i1];
+
+                for (int j = 0; j < length2; j++)
+                {
+                    strs2[i1, j] = strs[i2, j];
+                }
+            }
+
+            return strs2;
+        }
+
+        internal static void Reverse2DimArray(string[,] theArray)
+        {
+            for (int rowIndex = 0;
+                 rowIndex <= (theArray.GetUpperBound(0)); rowIndex++)
+            {
+                for (int colIndex = 0;
+                     colIndex <= (theArray.GetUpperBound(1) / 2); colIndex++)
+                {
+                    string tempHolder = theArray[rowIndex, colIndex];
+                    theArray[rowIndex, colIndex] =
+                        theArray[rowIndex, theArray.GetUpperBound(1) - colIndex];
+                    theArray[rowIndex, theArray.GetUpperBound(1) - colIndex] =
+                        tempHolder;
+                }
+            }
+        }
+
+        internal static void FillMatrix<T>(T[,] matrix, IEnumerable<T> source)
+        {
+            using (IEnumerator<T> iterator = source.GetEnumerator())
+            {
+                for (int row = 0; row < matrix.GetLength(0); row++)
+                {
+                    for (int col = 0; col < matrix.GetLength(1); col++)
+                    {
+                        if (iterator.MoveNext())
+                        {
+                            matrix[row, col] = iterator.Current;
+                        }
+                        else
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
         }
 
         internal static string[,] GetGroupedFailedTestsAsArray(string spreadsheetId, string sheetId)
         {
-            var failedTestsGroupedArray = new string[1000, 3];
+            var failedTestsGroupedArray = new string[arrayMaxLength, 3];
 
-            var valuesGroupedResult = ReadEntries(spreadsheetId, sheetId, "A2:D1000");
+            var valuesGroupedResult = ReadEntries(spreadsheetId, sheetId, $"A2:D{arrayMaxLength}");
 
             if (valuesGroupedResult != null && valuesGroupedResult.Count > 0)
             {
@@ -112,11 +236,16 @@ namespace AutomationReportingAssistant
 
             var appendRequest = service.Spreadsheets.Values.Append(valueRange, spreadsheetId, range);
             appendRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.AppendRequest.ValueInputOptionEnum.USERENTERED;
-            var appendResponse = appendRequest.Execute();
+            _ = appendRequest.Execute();
         }
 
         static void UpdateEntry(string spreadsheetId, string sheetName, string rowId, string value)
         {
+            if (ReportingReqs.isReversedTestList)
+            {
+                rowId = (arrayMaxLength - int.Parse(rowId) + 3).ToString();
+            }
+
             var envColumn = ReportingReqs.environment == "rc" ? "I" : "J";
 
             var range = $"{sheetName}!{envColumn}{rowId}";
@@ -127,7 +256,7 @@ namespace AutomationReportingAssistant
 
             var updateRequest = service.Spreadsheets.Values.Update(valueRange, spreadsheetId, range);
             updateRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
-            var updateResponse = updateRequest.Execute();
+            _ = updateRequest.Execute();
         }
 
         static void DeleteEntry(string spreadsheetId)
@@ -158,9 +287,9 @@ namespace AutomationReportingAssistant
         public static void CopySheetFromOneSpreadSheetToOtherAndRename(string sSpreadsheetId, string tSpreadsheetId)
         {
             var sSpreadSheet = service.Spreadsheets.Get(sSpreadsheetId).Execute();
-            var sourceSheetId = sSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetOfAllTests).FirstOrDefault().Properties.SheetId;
+            var sourceSheetId = sSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.allTestsSheetName).FirstOrDefault().Properties.SheetId;
 
-            var isExistingPreviousSheet = sSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetCopiedFromSource).FirstOrDefault() != null;
+            var isExistingPreviousSheet = sSpreadSheet.Sheets.Where(s => s.Properties.Title == sheetCopiedFromSource).FirstOrDefault() != null;
 
             if (!isExistingPreviousSheet)
             {
@@ -178,7 +307,7 @@ namespace AutomationReportingAssistant
         public static void RenameSheet(string tSpreadsheetId)
         {
             var tSpreadSheet = service.Spreadsheets.Get(tSpreadsheetId).Execute();
-            var targetSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title.Contains($"{ReportingReqs.sheetOfAllTests} (")).FirstOrDefault().Properties.SheetId;
+            var targetSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title.Contains($"{ReportingReqs.allTestsSheetName} (")).FirstOrDefault().Properties.SheetId;
 
             BatchUpdateSpreadsheetRequest bussr = new BatchUpdateSpreadsheetRequest();
 
@@ -188,7 +317,7 @@ namespace AutomationReportingAssistant
                 {
                     Properties = new SheetProperties()
                     {
-                        Title = ReportingReqs.sheetCopiedFromSource,
+                        Title = sheetCopiedFromSource,
                         SheetId = targetSheetId
                     },
                     Fields = "Title"
@@ -204,12 +333,12 @@ namespace AutomationReportingAssistant
         {
             System.Threading.Thread.Sleep(1000);
             var tSpreadSheet = service.Spreadsheets.Get(tSpreadsheetId).Execute();
-            var sourceSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetOfAllTests).FirstOrDefault().Properties.SheetId;
-            var targetSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.sheetOfTestsGroupedByException).FirstOrDefault().Properties.SheetId;
+            var sourceSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title == ReportingReqs.allTestsSheetName).FirstOrDefault().Properties.SheetId;
+            var targetSheetId = tSpreadSheet.Sheets.Where(s => s.Properties.Title == sheetOfTestsGroupedByException).FirstOrDefault().Properties.SheetId;
 
             var sourceColumnId = ReportingReqs.environment == "rc" ? 8 : 9;
 
-            var targetColumnId = 3;
+            var targetColumnId = 4;
 
             var copyReq = new CopyPasteRequest()
             {
@@ -240,8 +369,10 @@ namespace AutomationReportingAssistant
             service.Spreadsheets.BatchUpdate(copyResource, tSpreadsheetId).Execute();
         }
 
-        internal static void CompareCurrentAndPreviousFailedTestsAndFillResults(string[,] currentDocUrlArray, string[,] currentGroupedDocUrlArray, string[,] previousDocUrlArray, string[,] previousGroupedDocUrlArray)
+        internal static void CompareCurrentAndPreviousFailedTestsAndFillResults(string[,] currentDocUrlArray, string[,] currentGroupedDocUrlArray, string[,] previousGroupedDocUrlArray)
         {
+            var previousDocUrlArray = GetAllFailedTestsAsArray(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, true);
+
             for (int i = 0; i < currentDocUrlArray.Length / 3 - 1; i++)
             {
                 for (int j = 0; j < previousDocUrlArray.Length / 3 - 1; j++)
@@ -267,13 +398,85 @@ namespace AutomationReportingAssistant
             }
         }
 
-        internal static void RunAllFailedTests(List<string> failedTestsList)
+        internal static async Task RunAllFailedTestsAsync(List<string> failedTestsList)
         {
-            var processedTestsCounter = 0;
-            var failedTestsListCounter = failedTestsList.Count;
+            failedTestsListCounter = failedTestsList.Count;
+
+            var partition = 4; // can take 15, need to check higher numbers
+
+            var fullPartitionsNum = failedTestsListCounter / partition;
+
+            IEnumerable<Task> failedTestsTasksNew;
+
+            for (int i = 0; i < fullPartitionsNum; i++)
+            {
+                failedTestsTasksNew = failedTestsList.Skip(i * partition).Take(partition).Select(failedTest => HandleTest(failedTest));
+                await Task.WhenAll(failedTestsTasksNew);
+
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine($">>>> Processed tests number: {processedTestsCounter} from total {failedTestsListCounter} tests\n");
+                Console.ResetColor();
+            }
+
+            failedTestsTasksNew = failedTestsList.Skip(fullPartitionsNum * partition).Select(failedTest => HandleTest(failedTest));
+            await Task.WhenAll(failedTestsTasksNew);
+
+            Console.ForegroundColor = ConsoleColor.Blue;
+            Console.WriteLine($">>>> Processed tests number: {processedTestsCounter} from total {failedTestsListCounter} tests");
+            Console.ResetColor();
+        }
+
+        internal static async Task HandleTest(string failedTest)
+        {
+            Console.WriteLine($"Start processing test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]}");
+
+            var testResult = await RunFailedTestAsync(failedTest.Split(":::").FirstOrDefault(), failedTest.Split(":::")[1]);
+
+            if (testResult.Contains("Failed") && !testResult.Contains(totalCountError) && !testResult.Contains(resultListError) && !testResult.Contains(unexpectedHtmlError))
+            {
+                var ex1 = testResult.Split(":::")[1].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "").Replace("<Pariplay.Gateway.ServiceLayer.Messages.Error>", "");
+
+                var ex2 = failedTest.Split(":::")[3].Replace("\r", "").Replace("\n", "").Replace("<string.Empty>", "").Replace("<br/>", "").Replace("<Automation.Api.DataAccessLayer.PlayersLimitsModels.PlayerLimits>", "").Replace("<BtoBet.Gateway.ServiceLayer.Messages.Common.Error>", "").Replace("<empty>", "").Replace("<Pariplay.Gateway.ServiceLayer.Messages.Error>", "");
+
+                if (ex1 == ex2)
+                {
+                    UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, failedTest.Split(":::")[2], $"{testResult.Split(":::")[0]}; Same exception");
+
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"Test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]} processed - Same exception");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, failedTest.Split(":::")[2], $"{testResult.Split(":::")[0]}; New exception: {testResult.Split(":::")[1]}");
+
+                    Console.ForegroundColor = ConsoleColor.DarkRed;
+                    Console.WriteLine($"Test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]} processed - New exception");
+                    Console.ResetColor();
+                }
+
+                processedTestsCounter++;
+            }
+            else if (testResult.Contains("Passed") || testResult.Contains("Skipped") || testResult.Contains("Inconclusive"))
+            {
+                UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, failedTest.Split(":::")[2], testResult);
+
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"Test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]} processed");
+                Console.ResetColor();
+
+                processedTestsCounter++;
+            }
+        }
+
+        internal static void RunAllFailedTestsParallel(List<string> failedTestsList)
+        {
+            failedTestsListCounter = failedTestsList.Count;
 
             Parallel.ForEach(failedTestsList, new ParallelOptions { MaxDegreeOfParallelism = 4 }, failedTest =>
             {
+                Console.WriteLine($"Start processing test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]}");
+
                 var testResult = RunFailedTest(failedTest.Split(":::").FirstOrDefault(), failedTest.Split(":::")[1]);
 
                 if (testResult.Contains("Failed") && !testResult.Contains(totalCountError) && !testResult.Contains(resultListError) && !testResult.Contains(unexpectedHtmlError))
@@ -284,28 +487,62 @@ namespace AutomationReportingAssistant
 
                     if (ex1 == ex2)
                     {
-                        UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.sheetOfAllTests, failedTest.Split(":::")[2], $"{testResult.Split(":::")[0]}; Same exception");
+                        UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, failedTest.Split(":::")[2], $"{testResult.Split(":::")[0]}; Same exception");
+
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"Test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]} processed - Same exception");
+                        Console.ResetColor();
                     }
                     else
                     {
-                        UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.sheetOfAllTests, failedTest.Split(":::")[2], $"{testResult.Split(":::")[0]}; New exception: {testResult.Split(":::")[1]}");
+                        UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, failedTest.Split(":::")[2], $"{testResult.Split(":::")[0]}; New exception: {testResult.Split(":::")[1]}");
+
+                        Console.ForegroundColor = ConsoleColor.DarkRed;
+                        Console.WriteLine($"Test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]} processed - New exception");
+                        Console.ResetColor();
                     }
 
                     processedTestsCounter++;
                 }
                 else if (testResult.Contains("Passed") || testResult.Contains("Skipped") || testResult.Contains("Inconclusive"))
                 {
-                    UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.sheetOfAllTests, failedTest.Split(":::")[2], testResult);
+                    UpdateEntry(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, failedTest.Split(":::")[2], testResult);
+
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"Test {failedTest.Split(":::").FirstOrDefault() + failedTest.Split(":::")[1]} processed");
+                    Console.ResetColor();
 
                     processedTestsCounter++;
                 }
+
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine($">>>> Processed tests number: {processedTestsCounter} from total {failedTestsListCounter} tests\n");
+                Console.ResetColor();
             });
 
-            Console.WriteLine($"Processed tests number: {processedTestsCounter} from total {failedTestsListCounter} tests");
+            Console.ForegroundColor = ConsoleColor.Blue;
+            Console.WriteLine($">>>> Processed tests number: {processedTestsCounter} from total {failedTestsListCounter} tests");
+            Console.ResetColor();
         }
 
-        internal static void FillPivotSheetWithResults(string[,] groupedDocUrlArray, string[,] currentDocUrlArrayIncludingFilled)
+        internal static void FillPivotSheetWithResults()
         {
+
+            Console.WriteLine("STARTING FILLING RESULTS FOR 'ERROR PIVOTS LIST' SHEET");
+
+            var groupedDocUrlArray = GetGroupedFailedTestsAsArray(ReportingReqs.targetSpreadsheetId, sheetOfTestsGroupedByException);
+            
+            var currentDocUrlArrayIncludingFilled = GetAllFailedTestsAsArray(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, true);
+
+            if (ReportingReqs.isReversedTestList)
+            {
+                Stack<string> stack = new(currentDocUrlArrayIncludingFilled.Cast<string>());
+
+                FillMatrix(currentDocUrlArrayIncludingFilled, stack);
+
+                Reverse2DimArray(currentDocUrlArrayIncludingFilled);
+            }
+
             for (int i = 0; i < groupedDocUrlArray.Length / 3; i++)
             {
                 var exceptionGrouped = "";
@@ -331,6 +568,8 @@ namespace AutomationReportingAssistant
                     }
                 }
             }
+
+            Console.WriteLine("FILLING RESULTS FOR 'ERROR PIVOTS LIST' SHEET FINISHED");
         }
 
         internal static List<string> GetAllCommonFailedTests(string[,] currentDocUrlArray, string[,] previousDocUrlArray)
@@ -356,12 +595,14 @@ namespace AutomationReportingAssistant
             return failedTestsList;
         }
 
-        internal static List<string> GetAllCommonFailedTestsFilteredByKeys(string[,] currentDocUrlArray, string[,] previousDocUrlArray, List<string> keysList)
+        internal static List<string> GetAllCommonFailedTestsFilteredByKeys(string[,] currentDocUrlArray)
         {
+            var previousDocUrlArray = GetAllFailedTestsAsArray(ReportingReqs.targetSpreadsheetId, ReportingReqs.allTestsSheetName, true);
+
             var allCommonFailedTestsList = GetAllCommonFailedTests(currentDocUrlArray, previousDocUrlArray);
             var allCommonFailedTestsListFilteredByKeys = new List<string>();
 
-            if (keysList.Count == 0)
+            if (ReportingReqs.keysFilterList.Count == 0)
             {
                 foreach (var allCommonFailedTest in allCommonFailedTestsList)
                 {
@@ -375,7 +616,7 @@ namespace AutomationReportingAssistant
             {
                 foreach (var allCommonFailedTest in allCommonFailedTestsList)
                 {
-                    foreach (var key in keysList)
+                    foreach (var key in ReportingReqs.keysFilterList)
                     {
                         if (allCommonFailedTest.Split(":::").FirstOrDefault().ToLower().Contains(key.ToLower()))
                         {
@@ -398,13 +639,11 @@ namespace AutomationReportingAssistant
             var inconclusiveCount = "";
             var skippedCount = "";
 
-            var retryCount = 3;
-
             var requestUrl = $"http://specflow.{ReportingReqs.environment}.gamesrv1.com/Home/RunTests";
 
             var request = new RestRequest(requestUrl, Method.Post);
 
-            for (int i = 0; i < retryCount - 1; i++)
+            for (int i = 0; i < retryCount; i++)
             {
                 parameterTestValue = $"tests[]={GetTestFullName(testName)}{parameterName}&connectionId=9f0ea001-646c-44ba-a6d3-8272d7f7f449&testParameters=";
 
@@ -416,14 +655,14 @@ namespace AutomationReportingAssistant
 
             if (parameterTestValue == string.Empty)
             {
-                return $"GetTestFullName HTTP response was null after {retryCount} tries in test {testName}{parameterName}";
+                return $"GetTestFullName HTTP response was null after {retryCount} retries in test {testName}{parameterName}";
             }
 
             request.AddHeader("Content-Length", $"{parameterTestValue.Length}");
             request.AddHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
             request.AddParameter("", parameterTestValue, ParameterType.RequestBody);
 
-            for (int i = 0; i < retryCount - 1; i++)
+            for (int i = 0; i < retryCount; i++)
             {
                 response = new RestClient(requestUrl).ExecuteAsync(request).Result.Content;
 
@@ -435,7 +674,7 @@ namespace AutomationReportingAssistant
 
             if (response == null)
             {
-                var retryFailMessage = $"RunFaiIedTest HTTP response was null after {retryCount} tries";
+                var retryFailMessage = $"RunFailedTest HTTP response was null after {retryCount} retries";
 
                 Console.WriteLine($"{retryFailMessage} in test {testName}{parameterName}");
                 return retryFailMessage;
@@ -510,6 +749,168 @@ namespace AutomationReportingAssistant
                 Console.WriteLine($"{unexpectedHtmlError}{testName}{parameterName}");
                 return $"{unexpectedHtmlError}{testName}{parameterName}";
             }
+        }
+
+    internal static async Task<string> RunFailedTestAsync(string testName, string parameterName)
+    {
+        var parameterTestValue = "";
+        var response = "";
+        var totalCount = "";
+        var passedCount = "";
+        var failedCount = "";
+        var inconclusiveCount = "";
+        var skippedCount = "";
+
+        var requestUrl = $"http://specflow.{ReportingReqs.environment}.gamesrv1.com/Home/RunTests";
+
+        var request = new RestRequest(requestUrl, Method.Post);
+
+        parameterTestValue = $"tests[]={await GetTestFullNameAsync(testName)}{parameterName}&connectionId=9f0ea001-646c-44ba-a6d3-8272d7f7f449&testParameters=";
+
+        if (parameterTestValue == string.Empty)
+        {
+            return $"GetTestFullName HTTP response was null after {retryCount} retries in test {testName}{parameterName}";
+        }
+
+        request.AddHeader("Content-Length", $"{parameterTestValue.Length}");
+        request.AddHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        request.AddParameter("", parameterTestValue, ParameterType.RequestBody);
+
+        for (int i = 0; i < retryCount; i++)
+        {
+            RestResponse newResponse = await new RestClient(new RestClientOptions { Timeout = 300000 }).ExecuteAsync(request);
+
+            response = newResponse.Content;
+
+            if (response != null) break;
+        }
+
+        if (response == null)
+        {
+            var retryFailMessage = $"RunFailedTest HTTP response was null after {retryCount} retries";
+
+            Console.WriteLine($"{retryFailMessage} in test {testName}{parameterName}");
+            return retryFailMessage;
+        }
+
+        var source = WebUtility.HtmlDecode(response);
+        var html = new HtmlDocument();
+        html.LoadHtml(source);
+
+        var root = html.DocumentNode;
+
+        try
+        {
+            var resultList = root.Descendants("h6").Where(t => t.InnerHtml.Contains("Passed")).Select(t => t.InnerText).ToList().FirstOrDefault();
+
+            if (resultList != null)
+            {
+                var resultArray = resultList.Split(';');
+
+                var exceptionMessage = root.Descendants("span");
+
+                var exceptionMessageParsed = "";
+                foreach (var e in exceptionMessage.Skip(1))
+                {
+                    exceptionMessageParsed += e.InnerText;
+                }
+
+                totalCount = resultArray[0].Split(':')[1].Trim();
+                passedCount = resultArray[1].Split(':')[1].Trim();
+                failedCount = resultArray[2].Split(':')[1].Trim();
+                inconclusiveCount = resultArray[3].Split(':')[1].Trim();
+                skippedCount = resultArray[4].Split(':')[1].Trim().Split("   ").FirstOrDefault();
+
+                if (totalCount == "1")
+                {
+                    var returnValue = "";
+
+                    if (passedCount == "1")
+                    {
+                        returnValue = "Passed";
+                    }
+                    else if (failedCount == "1")
+                    {
+                        returnValue = $"Failed:::{exceptionMessageParsed}";
+                    }
+                    else if (inconclusiveCount == "1")
+                    {
+                        returnValue = "Inconclusive";
+                        Console.WriteLine($"{returnValue}: {testName}{parameterName}");
+                    }
+                    else if (skippedCount == "1")
+                    {
+                        returnValue = "Skipped";
+                        Console.WriteLine($"{returnValue}: {testName}{parameterName}");
+                    }
+                    return returnValue;
+                }
+                else
+                {
+                    Console.WriteLine($"{totalCountError}{testName}{parameterName}");
+                    return $"{totalCountError}{testName}{parameterName}";
+                }
+            }
+            else
+            {
+                Console.WriteLine($"{resultListError}{testName}{parameterName}");
+                return $"{resultListError}{testName}{parameterName}";
+            }
+        }
+        catch (NullReferenceException)
+        {
+            Console.WriteLine($"{unexpectedHtmlError}{testName}{parameterName}");
+            return $"{unexpectedHtmlError}{testName}{parameterName}";
+        }
+    }
+
+    internal static async Task<string> GetTestFullNameAsync(string testName)
+        {
+            var fullTestName = "";
+            var response = "";
+
+            var requestUrl = $"http://specflow.{ReportingReqs.environment}.gamesrv1.com/Home/GetTree?search={testName.Replace("\\", "")}";
+            
+            for (int i = 0; i < retryCount; i++)
+            {
+                RestResponse newResponse = await new RestClient(new RestClientOptions { Timeout = 300000 }).ExecuteGetAsync(new RestRequest(requestUrl, Method.Get));
+                
+                response = newResponse.Content;
+
+                if (response != null) break;
+            }
+
+            try
+            {
+                var json = (JObject)JsonConvert.DeserializeObject(response);
+
+                var pathList = json.DescendantsAndSelf().OfType<JProperty>().Where(p => p.Name == "fullName").Select(v => v.Value).ToList();
+
+                foreach (var item in pathList)
+                {
+                    if (item.ToString().EndsWith(testName))
+                    {
+                        fullTestName = item.ToString();
+                    }
+                }
+            }
+            catch (ArgumentNullException e)
+            {
+                Console.WriteLine("VPN is probably disabled");
+            }
+            catch (JsonReaderException)
+            {
+                if (response.Contains("An error occurred while processing your request"))
+                {
+                    Console.WriteLine($"HTML response is returned with error instead of JSON for test {testName}");
+                }
+                else
+                {
+                    Console.WriteLine($"Could not parse JSON response for test {testName}");
+                }
+            }
+
+            return fullTestName;
         }
 
         internal static string GetTestFullName(string testName)
