@@ -209,7 +209,7 @@ namespace AutomationReportingAssistant
 
             var sourceColumnId = ReportingReqs.environment == "rc" ? 8 : 9;
 
-            var targetColumnId = 3;
+            var targetColumnId = 4;
 
             var copyReq = new CopyPasteRequest()
             {
